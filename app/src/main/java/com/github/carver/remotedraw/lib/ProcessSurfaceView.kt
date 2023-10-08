@@ -17,14 +17,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * 继承了 SurfaceView，提供跨进程渲染的 Surface。
  */
-class ProcessSurfaceView : SurfaceView, SurfaceHolder.Callback, ServiceConnection {
+class ProcessSurfaceView @JvmOverloads constructor(
+    context: Context, attrs: AttributeSet? = null
+) : SurfaceView(context, attrs), SurfaceHolder.Callback, ServiceConnection {
     private var surface: Surface? = null
     private var iRemoteDraw: IRemoteDraw? = null
     private val isSetSurface = AtomicBoolean(false)
+    var statusCallback: ((Boolean) -> Unit)? = null
 
-    constructor(context: Context): super(context)
-    constructor(context: Context, attrs: AttributeSet) : super(context, attrs)
-    constructor(context: Context, attrs: AttributeSet, defStyle: Int) : super(context, attrs, defStyle)
 
     init {
         holder.addCallback(this@ProcessSurfaceView)
@@ -54,19 +54,29 @@ class ProcessSurfaceView : SurfaceView, SurfaceHolder.Callback, ServiceConnectio
         }
         iRemoteDraw = IRemoteDraw.Stub.asInterface(iBinder)
         setSurfaceToRemote()
+        statusCallback?.invoke(true)
     }
 
     override fun onServiceDisconnected(p0: ComponentName?) {
         Log.e(TAG, "onServiceDisconnected.")
+        statusCallback?.invoke(false)
+        isSetSurface.set(false)
     }
 
     override fun dispatchTouchEvent(event: MotionEvent?): Boolean {
-        return iRemoteDraw?.dispatchTouchEvent(event) ?: false
+        if (iRemoteDraw?.asBinder()?.isBinderAlive == true) {
+            return iRemoteDraw?.dispatchTouchEvent(event) ?: false
+        }
+        return false
     }
 
     private fun bindService() {
         val intent = Intent(context, RemoteDrawService::class.java)
-        context.bindService(intent, this@ProcessSurfaceView, Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT)
+        context.bindService(
+            intent,
+            this@ProcessSurfaceView,
+            Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT
+        )
     }
 
     private fun setSurfaceToRemote() {
@@ -74,9 +84,21 @@ class ProcessSurfaceView : SurfaceView, SurfaceHolder.Callback, ServiceConnectio
             Log.i(TAG, "setSurfaceToRemote: has set surface.")
             return
         }
-        if (iRemoteDraw != null && surface != null) {
-            iRemoteDraw!!.setSurface(surface!!)
+        if (iRemoteDraw != null && surface != null && iRemoteDraw?.asBinder()?.isBinderAlive == true) {
+            iRemoteDraw?.setSurface(surface!!)
             isSetSurface.set(true)
+        }
+    }
+
+    fun reconnect() {
+        if (iRemoteDraw?.asBinder()?.isBinderAlive != true) {
+            bindService()
+        }
+    }
+
+    fun back(){
+        if (iRemoteDraw?.asBinder()?.isBinderAlive == true) {
+            iRemoteDraw?.back()
         }
     }
 
